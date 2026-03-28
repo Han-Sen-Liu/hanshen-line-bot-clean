@@ -22,6 +22,7 @@ ensureFile(DATA_FILE, {});
 ensureFile(USERS_FILE, {});
 ensureFile(USAGE_FILE, {});
 ensureFile(CODES_FILE, {
+  TEST100: 100,
   A1B2C3: 30,
   D4E5F6: 30,
   G7H8I9: 80,
