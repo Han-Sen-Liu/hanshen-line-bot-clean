@@ -6,6 +6,8 @@ require("dotenv").config();
 const app = express();
 app.use(express.json());
 
+console.log("SERVER_VERSION_V3");
+
 // ===== 檔案初始化 =====
 const DATA_FILE = "./data.json";
 const USERS_FILE = "./users.json";
@@ -44,155 +46,104 @@ let redeemCodes = readJson(CODES_FILE);
 
 // ===== 基本設定 =====
 const FREE_TIMES = 3;
-const PURCHASE_LINK = "YOUR_VOCUS_LINK";
+const PURCHASE_LINK = "https://vocus.cc/salon/HansenWork?utm_source=LINE&utm_medium=social&utm_campaign=share";
 
-const quotes = [
-  "局未明，不動就是贏",
-  "穩一分，勝過衝三步",
-  "看懂局，比拼命更重要",
-  "人亂，局就亂",
-  "慢，是另一種快",
-  "不出錯，就是優勢",
-  "撐住現在，才有翻盤",
-  "方向錯，努力都白費",
-  "能忍的人，走得遠",
-  "急，是最大的風險",
-  "不確定，就不要下注",
-  "看清楚，再出手",
-  "局勢比情緒重要",
-  "人穩，運就穩",
-  "不貪，才走得久",
-  "有退路，才敢進攻",
-  "先活下來，再談贏",
-  "選對，比努力重要",
-  "不亂動，就是掌控",
-  "時機對，事就成"
-];
-
-// ===== 工具函式 =====
+// ===== 工具 =====
 function getUserRecord(userId) {
   if (!userUsage[userId]) {
-    userUsage[userId] = {
-      freeUsed: 0,
-      paidRemaining: 0
-    };
+    userUsage[userId] = { freeUsed: 0, paidRemaining: 0 };
     writeJson(USAGE_FILE, userUsage);
   }
   return userUsage[userId];
 }
 
 function getRemaining(userId) {
-  const user = getUserRecord(userId);
-  return Math.max(0, (FREE_TIMES - user.freeUsed)) + user.paidRemaining;
+  const u = getUserRecord(userId);
+  return Math.max(0, FREE_TIMES - u.freeUsed) + u.paidRemaining;
 }
 
 function hasQuota(userId) {
   return getRemaining(userId) > 0;
 }
 
-function useOneQuota(userId) {
-  const user = getUserRecord(userId);
-
-  if (user.paidRemaining > 0) {
-    user.paidRemaining -= 1;
-  } else if (user.freeUsed < FREE_TIMES) {
-    user.freeUsed += 1;
-  }
-
+function useOne(userId) {
+  const u = getUserRecord(userId);
+  if (u.paidRemaining > 0) u.paidRemaining--;
+  else if (u.freeUsed < FREE_TIMES) u.freeUsed++;
   writeJson(USAGE_FILE, userUsage);
 }
 
-function addPaidUsage(userId, count) {
-  const user = getUserRecord(userId);
-  user.paidRemaining += count;
+function addPaid(userId, count) {
+  const u = getUserRecord(userId);
+  u.paidRemaining += count;
   writeJson(USAGE_FILE, userUsage);
 }
 
-async function replyMessage(replyToken, text) {
+async function reply(token, text) {
   await axios.post(
     "https://api.line.me/v2/bot/message/reply",
     {
-      replyToken,
+      replyToken: token,
       messages: [{ type: "text", text }]
     },
     {
       headers: {
-        "Content-Type": "application/json",
-        Authorization: Bearer ${process.env.CHANNEL_ACCESS_TOKEN}
+        Authorization: `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}`,
+        "Content-Type": "application/json"
       }
     }
   );
 }
 
-function buildKnowledgeText() {
-  return Object.entries(data)
-    .map(([group, items]) => {
-      const body = Object.entries(items)
-        .map(([k, v]) => `- ${k}：${v}`)
-        .join("\n");
-      return `${group}：\n${body}`;
-    })
-    .join("\n\n");
+// ===== 強制繁體 =====
+function toTraditional(text) {
+  const map = {
+    "师":"師","费":"費","联":"聯","络":"絡","说":"說","这":"這","个":"個",
+    "会":"會","为":"為","开":"開","关":"關","应":"應","对":"對","问":"問",
+    "题":"題","时":"時","间":"間","发":"發","现":"現","实":"實","后":"後"
+  };
+  return text.replace(/[\u4e00-\u9fa5]/g, c => map[c] || c);
 }
 
-function buildUsageGuide() {
-  return `【使用方式】
-1. 點「軍師判斷」
-2. 輸入你的問題
-3. （可選）加上生辰八字
-4. 系統回覆：判斷／原因／建議
-
-【免費次數】
-新用戶享有 3 次免費
-
-【收費方案】
-30次：88元
-80次：168元
-
-【購買方式】
-1. 點擊購買：
-${PURCHASE_LINK}
-2. 取得啟用碼
-3. 回來輸入啟用碼開通
-
-【注意】
-- 每問一次扣1次
-- 次數用完需重新購買
-- 啟用碼限使用一次`;
-}
-
-function buildPricingText() {
+// ===== 回覆模板 =====
+function pricing() {
   return `【收費方案】
 30次：88元
 80次：168元
 
-【購買連結】
+購買：
 ${PURCHASE_LINK}
 
-【開通方式】
-付款後取得啟用碼
-回到 LINE 直接輸入啟用碼即可開通`;
+付款後輸入啟用碼開通`;
 }
 
-function buildContactText() {
-  return `【聯絡軍師】
-合作、客製、問題回報
-請直接留言你的需求
+function usage() {
+  return `【使用方式】
+點「軍師判斷」→ 輸入問題
 
-若需購買方案：
+免費：3次
+
+收費：
+30次：88
+80次：168
+
+購買：
 ${PURCHASE_LINK}`;
 }
 
-function buildAskPrompt(userId) {
-  const birth = users[userId]?.birth || "尚未提供";
-  const remaining = getRemaining(userId);
+function contact() {
+  return `【聯絡軍師】
+合作 / 問題 / 客製
+直接留言即可
 
-  return `請直接輸入你的問題
+購買：
+${PURCHASE_LINK}`;
+}
 
-你目前生辰資料：
-${birth}
+function ask(userId) {
+  return `請輸入你的問題
 
-剩餘次數：${remaining}`;
+剩餘次數：${getRemaining(userId)}`;
 }
 
 // ===== Webhook =====
@@ -202,94 +153,63 @@ app.post("/webhook", async (req, res) => {
   try {
     const events = req.body.events || [];
 
-    for (const event of events) {
-      if (event.type !== "message") continue;
-      if (event.message.type !== "text") continue;
-      if (!event.source || event.source.type !== "user") continue;
+    for (const e of events) {
+      if (e.type !== "message") continue;
+      if (e.message.type !== "text") continue;
 
-      const userId = event.source.userId;
-      const replyToken = event.replyToken;
-      const userText = event.message.text.trim();
+      const userId = e.source.userId;
+      const token = e.replyToken;
+      const text = e.message.text.trim();
 
-      // 建立使用者資料
       getUserRecord(userId);
 
-      // ===== 1. 記錄生辰 =====
-      if (userText.includes("生日") || userText.includes("生辰八字") || userText.includes("生辰")) {
-        users[userId] = {
-          ...(users[userId] || {}),
-          birth: userText
-        };
+      // 生辰
+      if (text.includes("生辰")) {
+        users[userId] = { birth: text };
         writeJson(USERS_FILE, users);
-
-        await replyMessage(
-          replyToken,
-          主公生辰已記錄\n\n目前資料：${userText}
-        );
+        await reply(token, "生辰已記錄");
         continue;
       }
 
-      // ===== 2. Rich Menu 文字分流 =====
-      if (userText === "軍師判斷") {
-        await replyMessage(replyToken, buildAskPrompt(userId));
+      // 四按鈕
+      if (text === "軍師判斷") {
+        await reply(token, ask(userId));
+        continue;
+      }
+      if (text === "收費方案") {
+        await reply(token, pricing());
+        continue;
+      }
+      if (text === "使用說明") {
+        await reply(token, usage());
+        continue;
+      }
+      if (text === "聯絡軍師") {
+        await reply(token, contact());
         continue;
       }
 
-      if (userText === "收費方案") {
-        await replyMessage(replyToken, buildPricingText());
-        continue;
-      }
-
-      if (userText === "使用說明") {
-        await replyMessage(replyToken, buildUsageGuide());
-        continue;
-      }
-
-      if (userText === "聯絡軍師") {
-        await replyMessage(replyToken, buildContactText());
-        continue;
-      }
-
-      // ===== 3. 啟用碼兌換 =====
-      if (redeemCodes[userText]) {
-        const count = redeemCodes[userText];
-        addPaidUsage(userId, count);
-        delete redeemCodes[userText];
+      // 啟用碼
+      if (redeemCodes[text]) {
+        const c = redeemCodes[text];
+        addPaid(userId, c);
+        delete redeemCodes[text];
         writeJson(CODES_FILE, redeemCodes);
-
-        await replyMessage(
-          replyToken,
-          開通成功，已增加 ${count} 次\n\n目前剩餘次數：${getRemaining(userId)}
-        );
+        await reply(token, `開通成功 +${c}\n剩餘：${getRemaining(userId)}`);
         continue;
       }
 
-      // ===== 4. 次數不足 =====
+      // 沒次數
       if (!hasQuota(userId)) {
-        await replyMessage(
-          replyToken,
-          `已達使用上限
-
-【收費方案】
-30次：88元
-80次：168元
-
-【購買連結】
-${PURCHASE_LINK}
-
-付款後輸入啟用碼即可開通`
-        );
+        await reply(token, pricing());
         continue;
       }
 
-      // ===== 5. 扣次數 =====
-      useOneQuota(userId);
+      // 扣次數
+      useOne(userId);
 
-      // ===== 6. 組 AI Prompt =====
-      const knowledge = buildKnowledgeText();
-      const birth = users[userId]?.birth || "尚未提供";
-
-      const aiRes = await axios.post(
+      // AI
+      const ai = await axios.post(
         "https://router.huggingface.co/v1/chat/completions",
         {
           model: "Qwen/Qwen2.5-7B-Instruct",
@@ -297,77 +217,39 @@ ${PURCHASE_LINK}
             {
               role: "system",
               content: `你是涵森軍師。
-你的回答規則如下：
-
-1. 一律使用繁體中文
-2. 一律短句
-3. 一律用以下格式輸出：
+格式固定：
 【判斷】
-一句話直接結論
-
 【原因】
-最多3句白話理由
-
-【建議】
-給一個立即可做的具體行動
-
-4. 不要安慰
-5. 不要模糊
-6. 不要長篇解釋
-7. 不得省略三段格式`
+【建議】`
             },
             {
               role: "user",
-              content: `主公生辰：
-${birth}
-
-命理資料：
-${knowledge}
-
-使用者問題：
-${userText}`
+              content: text
             }
-          ],
-          temperature: 0.7
+          ]
         },
         {
           headers: {
-            Authorization: `Bearer ${process.env.HUGGINGFACE_TOKEN}`,
-            "Content-Type": "application/json"
+            Authorization: `Bearer ${process.env.HUGGINGFACE_TOKEN}`
           }
         }
       );
 
-      const replyText =
-        aiRes.data?.choices?.[0]?.message?.content || "【判斷】\n系統忙碌\n\n【原因】\n目前回應失敗\n\n【建議】\n請再發一次";
+      let replyText =
+        ai.data?.choices?.[0]?.message?.content || "系統忙碌";
 
-      const randomQuote = quotes[Math.floor(Math.random() * quotes.length)];
-      const remaining = getRemaining(userId);
+      replyText = toTraditional(replyText);
 
-      const finalText = `${replyText}
+      const final = `${replyText}
 
-【涵森軍師｜護身心法】
-${randomQuote}
+剩餘次數：${getRemaining(userId)}
+購買：${PURCHASE_LINK}`;
 
-剩餘次數：${remaining}
-購買連結：${PURCHASE_LINK}
-
-——涵森軍師`;
-
-      await replyMessage(replyToken, finalText);
-
-      console.log("AI REPLY OK");
+      await reply(token, final);
     }
   } catch (err) {
-    console.log("AI REPLY ERROR");
-    console.log(err.response?.data || err.message);
+    console.log(err.message);
   }
 });
 
-app.get("/", (req, res) => {
-  res.send("Hansen strategist bot is running");
-});
-
-app.listen(3000, () => {
-  console.log("Server running on port 3000");
-});
+app.listen(3000, () => console.log("RUNNING"));
