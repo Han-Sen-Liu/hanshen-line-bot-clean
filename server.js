@@ -6,17 +6,17 @@ require("dotenv").config();
 const app = express();
 app.use(express.json());
 
-console.log("SERVER_VERSION_V3");
+console.log("SERVER_VERSION_V4");
 
-// ===== 檔案初始化 =====
+// ===== 檔案 =====
 const DATA_FILE = "./data.json";
 const USERS_FILE = "./users.json";
 const USAGE_FILE = "./usage.json";
 const CODES_FILE = "./codes.json";
 
-function ensureFile(filePath, defaultValue) {
-  if (!fs.existsSync(filePath)) {
-    fs.writeFileSync(filePath, JSON.stringify(defaultValue, null, 2), "utf-8");
+function ensureFile(file, def) {
+  if (!fs.existsSync(file)) {
+    fs.writeFileSync(file, JSON.stringify(def, null, 2));
   }
 }
 
@@ -31,52 +31,51 @@ ensureFile(CODES_FILE, {
   J1K2L3: 80
 });
 
-function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, "utf-8"));
+function read(file) {
+  return JSON.parse(fs.readFileSync(file));
 }
 
-function writeJson(filePath, data) {
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf-8");
+function write(file, data) {
+  fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
-const data = readJson(DATA_FILE);
-let users = readJson(USERS_FILE);
-let userUsage = readJson(USAGE_FILE);
-let redeemCodes = readJson(CODES_FILE);
+let users = read(USERS_FILE);
+let usage = read(USAGE_FILE);
+let codes = read(CODES_FILE);
 
-// ===== 基本設定 =====
-const FREE_TIMES = 3;
-const PURCHASE_LINK = "https://vocus.cc/salon/HansenWork?utm_source=LINE&utm_medium=social&utm_campaign=share";
+// ===== 設定 =====
+const FREE = 3;
+const LINK = "https://vocus.cc/salon/HansenWork";
 
 // ===== 工具 =====
-function getUserRecord(userId) {
-  if (!userUsage[userId]) {
-    userUsage[userId] = { freeUsed: 0, paidRemaining: 0 };
-    writeJson(USAGE_FILE, userUsage);
+function getUser(id) {
+  if (!usage[id]) {
+    usage[id] = { free: 0, paid: 0 };
+    write(USAGE_FILE, usage);
   }
-  return userUsage[userId];
+  return usage[id];
 }
 
-function getRemaining(userId) {
-  const u = getUserRecord(userId);
-  return Math.max(0, FREE_TIMES - u.freeUsed) + u.paidRemaining;
+function remaining(id) {
+  const u = getUser(id);
+  return Math.max(0, FREE - u.free) + u.paid;
 }
 
-function hasQuota(userId) {
-  return getRemaining(userId) > 0;
+function hasQuota(id) {
+  return remaining(id) > 0;
 }
 
-function useOne(userId) {
-  const u = getUserRecord(userId);
-  if (u.paidRemaining > 0) u.paidRemaining--;
-  else if (u.freeUsed < FREE_TIMES) u.freeUsed++;
-  writeJson(USAGE_FILE, userUsage);
+function useOne(id) {
+  const u = getUser(id);
+  if (u.paid > 0) u.paid--;
+  else u.free++;
+  write(USAGE_FILE, usage);
 }
 
-function addPaid(userId, count) {
-  const u = getUserRecord(userId);
-  u.paidRemaining += count;
-  writeJson(USAGE_FILE, userUsage);
+function addPaid(id, n) {
+  const u = getUser(id);
+  u.paid += n;
+  write(USAGE_FILE, usage);
 }
 
 async function reply(token, text) {
@@ -88,36 +87,37 @@ async function reply(token, text) {
     },
     {
       headers: {
-        Authorization: `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}`,
-        "Content-Type": "application/json"
+        Authorization: `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}`
       }
     }
   );
 }
 
 // ===== 強制繁體 =====
-function toTraditional(text) {
-  const map = {
+function t(text) {
+  const m = {
     "师":"師","费":"費","联":"聯","络":"絡","说":"說","这":"這","个":"個",
     "会":"會","为":"為","开":"開","关":"關","应":"應","对":"對","问":"問",
     "题":"題","时":"時","间":"間","发":"發","现":"現","实":"實","后":"後"
   };
-  return text.replace(/[\u4e00-\u9fa5]/g, c => map[c] || c);
+  return text.replace(/[\u4e00-\u9fa5]/g, c => m[c] || c);
 }
 
-// ===== 回覆模板 =====
+// ===== 文案 =====
 function pricing() {
   return `【收費方案】
 30次：88元
 80次：168元
 
 購買：
-${PURCHASE_LINK}
+${LINK}
 
-付款後輸入啟用碼開通`;
+付款後輸入啟用碼開通
+
+（限量測試中）`;
 }
 
-function usage() {
+function usageText() {
   return `【使用方式】
 點「軍師判斷」→ 輸入問題
 
@@ -128,22 +128,23 @@ function usage() {
 80次：168
 
 購買：
-${PURCHASE_LINK}`;
+${LINK}`;
 }
 
 function contact() {
   return `【聯絡軍師】
-合作 / 問題 / 客製
-直接留言即可
+合作 / 客製 / 問題
+
+直接留言
 
 購買：
-${PURCHASE_LINK}`;
+${LINK}`;
 }
 
-function ask(userId) {
-  return `請輸入你的問題
+function ask(id) {
+  return `請輸入問題
 
-剩餘次數：${getRemaining(userId)}`;
+剩餘：${remaining(id)}`;
 }
 
 // ===== Webhook =====
@@ -151,62 +152,46 @@ app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
 
   try {
-    const events = req.body.events || [];
-
-    for (const e of events) {
+    for (const e of req.body.events || []) {
       if (e.type !== "message") continue;
       if (e.message.type !== "text") continue;
 
-      const userId = e.source.userId;
+      const id = e.source.userId;
       const token = e.replyToken;
       const text = e.message.text.trim();
 
-      getUserRecord(userId);
+      getUser(id);
 
       // 生辰
       if (text.includes("生辰")) {
-        users[userId] = { birth: text };
-        writeJson(USERS_FILE, users);
-        await reply(token, "生辰已記錄");
+        users[id] = { birth: text };
+        write(USERS_FILE, users);
+        await reply(token, "已記錄");
         continue;
       }
 
       // 四按鈕
-      if (text === "軍師判斷") {
-        await reply(token, ask(userId));
-        continue;
-      }
-      if (text === "收費方案") {
-        await reply(token, pricing());
-        continue;
-      }
-      if (text === "使用說明") {
-        await reply(token, usage());
-        continue;
-      }
-      if (text === "聯絡軍師") {
-        await reply(token, contact());
-        continue;
-      }
+      if (text === "軍師判斷") return reply(token, ask(id));
+      if (text === "收費方案") return reply(token, pricing());
+      if (text === "使用說明") return reply(token, usageText());
+      if (text === "聯絡軍師") return reply(token, contact());
 
       // 啟用碼
-      if (redeemCodes[text]) {
-        const c = redeemCodes[text];
-        addPaid(userId, c);
-        delete redeemCodes[text];
-        writeJson(CODES_FILE, redeemCodes);
-        await reply(token, `開通成功 +${c}\n剩餘：${getRemaining(userId)}`);
-        continue;
+      if (codes[text]) {
+        const n = codes[text];
+        addPaid(id, n);
+        delete codes[text];
+        write(CODES_FILE, codes);
+        return reply(token, `開通成功 +${n}\n剩餘：${remaining(id)}`);
       }
 
       // 沒次數
-      if (!hasQuota(userId)) {
-        await reply(token, pricing());
-        continue;
+      if (!hasQuota(id)) {
+        return reply(token, pricing());
       }
 
-      // 扣次數
-      useOne(userId);
+      // 扣次
+      useOne(id);
 
       // AI
       const ai = await axios.post(
@@ -217,10 +202,21 @@ app.post("/webhook", async (req, res) => {
             {
               role: "system",
               content: `你是涵森軍師。
-格式固定：
+
+規則：
+- 繁體中文
+- 短句
+- 不超過3行
+
+格式：
 【判斷】
+一句話
+
 【原因】
-【建議】`
+2點內
+
+【建議】
+一個行動`
             },
             {
               role: "user",
@@ -235,20 +231,21 @@ app.post("/webhook", async (req, res) => {
         }
       );
 
-      let replyText =
+      let out =
         ai.data?.choices?.[0]?.message?.content || "系統忙碌";
 
-      replyText = toTraditional(replyText);
+      out = t(out);
 
-      const final = `${replyText}
+      await reply(
+        token,
+        `${out}
 
-剩餘次數：${getRemaining(userId)}
-購買：${PURCHASE_LINK}`;
-
-      await reply(token, final);
+剩餘：${remaining(id)}
+購買：${LINK}`
+      );
     }
-  } catch (err) {
-    console.log(err.message);
+  } catch (e) {
+    console.log(e.message);
   }
 });
 
