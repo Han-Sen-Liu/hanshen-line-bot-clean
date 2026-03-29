@@ -183,6 +183,10 @@ app.post("/webhook", async (req, res) => {
       if (text === "聯絡軍師") return reply(token, contact());
 
       // ===== 3 啟用碼 =====
+      console.log("CODE_CHECK", text, 
+      codes[text],
+      JSON.stringify(codes));
+       
       if (codes[text]) {
         const n = codes[text];
         addPaid(id, n);
