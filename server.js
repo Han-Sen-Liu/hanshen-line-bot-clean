@@ -45,7 +45,13 @@ function write(f, d) {
 
 let users = read(USERS_FILE);
 let usage = read(USAGE_FILE);
-let codes = read(CODES_FILE);
+let codes = {
+  TEST100: 100,
+  A1B2C3: 30,
+  D4E5F6: 30,
+  G7H8I9: 80,
+  J1K2L3: 80
+};
 
 // ===== 設定 =====
 const FREE = 3;
