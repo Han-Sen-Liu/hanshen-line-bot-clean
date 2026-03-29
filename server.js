@@ -22,11 +22,16 @@ function ensure(file, def) {
 ensure(USERS_FILE, {});
 ensure(USAGE_FILE, {});
 ensure(CODES_FILE, {
-  TEST100: 100,
-  A1B2C3: 30,
-  D4E5F6: 30,
-  G7H8I9: 80,
-  J1K2L3: 80
+  "TEST100": 100,
+
+  "A1B2C3": 30,
+  "D4E5F6": 30,
+
+  "G7H8I9": 80,
+  "J1K2L3": 80,
+
+  "VIP168": 168,
+  "PRO300": 300
 });
 
 function read(f) {
