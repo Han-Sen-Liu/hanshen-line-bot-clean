@@ -6,24 +6,22 @@ require("dotenv").config();
 const app = express();
 app.use(express.json());
 
-console.log("SERVER_VERSION_V4");
+console.log("SERVER_VERSION_V5");
 
 // ===== 檔案 =====
-const DATA_FILE = "./data.json";
 const USERS_FILE = "./users.json";
 const USAGE_FILE = "./usage.json";
 const CODES_FILE = "./codes.json";
 
-function ensureFile(file, def) {
+function ensure(file, def) {
   if (!fs.existsSync(file)) {
     fs.writeFileSync(file, JSON.stringify(def, null, 2));
   }
 }
 
-ensureFile(DATA_FILE, {});
-ensureFile(USERS_FILE, {});
-ensureFile(USAGE_FILE, {});
-ensureFile(CODES_FILE, {
+ensure(USERS_FILE, {});
+ensure(USAGE_FILE, {});
+ensure(CODES_FILE, {
   TEST100: 100,
   A1B2C3: 30,
   D4E5F6: 30,
@@ -31,12 +29,12 @@ ensureFile(CODES_FILE, {
   J1K2L3: 80
 });
 
-function read(file) {
-  return JSON.parse(fs.readFileSync(file));
+function read(f) {
+  return JSON.parse(fs.readFileSync(f));
 }
 
-function write(file, data) {
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+function write(f, d) {
+  fs.writeFileSync(f, JSON.stringify(d, null, 2));
 }
 
 let users = read(USERS_FILE);
@@ -45,7 +43,7 @@ let codes = read(CODES_FILE);
 
 // ===== 設定 =====
 const FREE = 3;
-const LINK = "https://vocus.cc/salon/HansenWork";
+const LINK = "https://vocus.cc/your-link";
 
 // ===== 工具 =====
 function getUser(id) {
@@ -135,10 +133,7 @@ function contact() {
   return `【聯絡軍師】
 合作 / 客製 / 問題
 
-直接留言
-
-購買：
-${LINK}`;
+直接留言`;
 }
 
 function ask(id) {
@@ -162,21 +157,20 @@ app.post("/webhook", async (req, res) => {
 
       getUser(id);
 
-      // 生辰
+      // ===== 1 生辰 =====
       if (text.includes("生辰")) {
         users[id] = { birth: text };
         write(USERS_FILE, users);
-        await reply(token, "已記錄");
-        continue;
+        return reply(token, "已記錄");
       }
 
-      // 四按鈕
+      // ===== 2 四按鈕 =====
       if (text === "軍師判斷") return reply(token, ask(id));
       if (text === "收費方案") return reply(token, pricing());
       if (text === "使用說明") return reply(token, usageText());
       if (text === "聯絡軍師") return reply(token, contact());
 
-      // 啟用碼
+      // ===== 3 啟用碼 =====
       if (codes[text]) {
         const n = codes[text];
         addPaid(id, n);
@@ -185,15 +179,15 @@ app.post("/webhook", async (req, res) => {
         return reply(token, `開通成功 +${n}\n剩餘：${remaining(id)}`);
       }
 
-      // 沒次數
+      // ===== 4 才檢查次數（關鍵修正）=====
       if (!hasQuota(id)) {
         return reply(token, pricing());
       }
 
-      // 扣次
+      // ===== 5 扣次數 =====
       useOne(id);
 
-      // AI
+      // ===== 6 AI =====
       const ai = await axios.post(
         "https://router.huggingface.co/v1/chat/completions",
         {
@@ -206,7 +200,7 @@ app.post("/webhook", async (req, res) => {
 規則：
 - 繁體中文
 - 短句
-- 不超過3行
+- 三段
 
 格式：
 【判斷】
@@ -236,7 +230,7 @@ app.post("/webhook", async (req, res) => {
 
       out = t(out);
 
-      await reply(
+      return reply(
         token,
         `${out}
 
