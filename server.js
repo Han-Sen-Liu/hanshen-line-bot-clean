@@ -6,7 +6,7 @@ require("dotenv").config();
 const app = express();
 app.use(express.json());
 
-console.log("SERVER_FINAL_V1");
+console.log("SERVER_OFFICIAL_V1");
 
 // ===== 檔案 =====
 const USERS_FILE = "./users.json";
@@ -34,9 +34,9 @@ let usage = read(USAGE_FILE);
 
 // ===== 基本設定 =====
 const FREE = 3;
-const LINK = "https://vocus.cc/your-link"; // ← 改成你的方格子連結
+const LINK = "https://vocus.cc/your-link"; // 改成你的方格子連結
 
-// ===== 工具 =====
+// ===== 使用者工具 =====
 function getUser(id) {
   if (!usage[id]) {
     usage[id] = { free: 0, paid: 0 };
@@ -72,6 +72,7 @@ function addPaid(id, count) {
   write(USAGE_FILE, usage);
 }
 
+// ===== 回 LINE =====
 async function reply(token, text) {
   await axios.post(
     "https://api.line.me/v2/bot/message/reply",
@@ -88,14 +89,15 @@ async function reply(token, text) {
   );
 }
 
-// ===== 強制繁體（基礎版） =====
+// ===== 簡轉繁（基礎版） =====
 function toTraditional(text) {
   const map = {
     "师":"師","费":"費","联":"聯","络":"絡","说":"說","这":"這","个":"個",
     "会":"會","为":"為","开":"開","关":"關","应":"應","对":"對","问":"問",
     "题":"題","时":"時","间":"間","发":"發","现":"現","实":"實","后":"後",
     "来":"來","过":"過","动":"動","点":"點","计":"計","画":"畫","国":"國",
-    "长":"長","风":"風","险":"險","机":"機","术":"術","断":"斷","级":"級"
+    "长":"長","风":"風","险":"險","机":"機","术":"術","断":"斷","级":"級",
+    "换":"換","资":"資","建议":"建議"
   };
 
   return text.replace(/[\u4e00-\u9fa5]/g, c => map[c] || c);
@@ -138,7 +140,6 @@ function contactText() {
 
 function askText(id) {
   const birth = users[id]?.birth || "尚未提供";
-
   return `請直接輸入你的問題
 
 生辰資料：${birth}
@@ -165,7 +166,7 @@ app.post("/webhook", async (req, res) => {
 
       getUser(id);
 
-      // ===== 記錄生辰 =====
+      // ===== 1. 記錄生辰 =====
       if (text.includes("生辰") || text.includes("生日")) {
         users[id] = {
           ...(users[id] || {}),
@@ -176,13 +177,13 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
-      // ===== Rich Menu 四按鈕 =====
+      // ===== 2. Rich Menu 四按鈕（永遠優先）=====
       if (text === "軍師判斷") {
         await reply(token, askText(id));
         continue;
       }
 
-      if (text === "收費方案") {
+      if (text === "收費方案" || text === "收費方式") {
         await reply(token, pricingText());
         continue;
       }
@@ -197,7 +198,7 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
-      // ===== 寫死啟用碼（先不要讀 codes.json） =====
+      // ===== 3. 啟用碼（永遠可用）=====
       if (text === "TEST100") {
         addPaid(id, 100);
         await reply(token, `開通成功 +100\n剩餘：${remaining(id)}`);
@@ -228,16 +229,16 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
-      // ===== 真正提問前，才檢查次數 =====
+      // ===== 4. 只有真正提問，才檢查次數 =====
       if (!hasQuota(id)) {
         await reply(token, pricingText());
         continue;
       }
 
-      // ===== 扣次數 =====
+      // ===== 5. 扣次數 =====
       useOne(id);
 
-      // ===== AI =====
+      // ===== 6. AI 回答 =====
       const aiRes = await axios.post(
         "https://router.huggingface.co/v1/chat/completions",
         {
@@ -250,10 +251,11 @@ app.post("/webhook", async (req, res) => {
 規則：
 1. 一律使用繁體中文
 2. 一律短句
-3. 禁止條列 1. 2. 3.
-4. 禁止客套話
-5. 不得長篇解釋
-6. 必須嚴格用以下格式
+3. 禁止客套話
+4. 禁止條列 1. 2. 3.
+5. 禁止使用 ** 符號
+6. 每段不超過2行
+7. 嚴格使用以下格式
 
 【判斷】
 一句話結論
@@ -264,7 +266,7 @@ app.post("/webhook", async (req, res) => {
 【建議】
 一個立即行動
 
-違反規則就重新寫`
+違規就重寫`
             },
             {
               role: "user",
