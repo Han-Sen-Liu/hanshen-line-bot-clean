@@ -6,7 +6,7 @@ require("dotenv").config();
 const app = express();
 app.use(express.json());
 
-console.log("SERVER_OFFICIAL_V1");
+console.log("SERVER_V_FINAL_777");
 
 // ===== 檔案 =====
 const USERS_FILE = "./users.json";
@@ -36,7 +36,7 @@ let usage = read(USAGE_FILE);
 const FREE = 3;
 const LINK = "https://vocus.cc/your-link"; // 改成你的方格子連結
 
-// ===== 使用者工具 =====
+// ===== 使用者資料 =====
 function getUser(id) {
   if (!usage[id]) {
     usage[id] = { free: 0, paid: 0 };
@@ -72,7 +72,7 @@ function addPaid(id, count) {
   write(USAGE_FILE, usage);
 }
 
-// ===== 回 LINE =====
+// ===== LINE 回覆 =====
 async function reply(token, text) {
   await axios.post(
     "https://api.line.me/v2/bot/message/reply",
@@ -89,7 +89,7 @@ async function reply(token, text) {
   );
 }
 
-// ===== 簡轉繁（基礎版） =====
+// ===== 簡轉繁（基礎） =====
 function toTraditional(text) {
   const map = {
     "师":"師","费":"費","联":"聯","络":"絡","说":"說","这":"這","个":"個",
@@ -97,7 +97,7 @@ function toTraditional(text) {
     "题":"題","时":"時","间":"間","发":"發","现":"現","实":"實","后":"後",
     "来":"來","过":"過","动":"動","点":"點","计":"計","画":"畫","国":"國",
     "长":"長","风":"風","险":"險","机":"機","术":"術","断":"斷","级":"級",
-    "换":"換","资":"資","建议":"建議"
+    "换":"換","资":"資","议":"議","单":"單","条":"條"
   };
 
   return text.replace(/[\u4e00-\u9fa5]/g, c => map[c] || c);
@@ -177,7 +177,7 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
-      // ===== 2. Rich Menu 四按鈕（永遠優先）=====
+      // ===== 2. 功能按鈕永遠優先 =====
       if (text === "軍師判斷") {
         await reply(token, askText(id));
         continue;
@@ -198,7 +198,7 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
-      // ===== 3. 啟用碼（永遠可用）=====
+      // ===== 3. 啟用碼永遠優先 =====
       if (text === "TEST100") {
         addPaid(id, 100);
         await reply(token, `開通成功 +100\n剩餘：${remaining(id)}`);
@@ -229,7 +229,7 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
-      // ===== 4. 只有真正提問，才檢查次數 =====
+      // ===== 4. 真正提問，才檢查次數 =====
       if (!hasQuota(id)) {
         await reply(token, pricingText());
         continue;
@@ -238,7 +238,7 @@ app.post("/webhook", async (req, res) => {
       // ===== 5. 扣次數 =====
       useOne(id);
 
-      // ===== 6. AI 回答 =====
+      // ===== 6. AI 回覆 =====
       const aiRes = await axios.post(
         "https://router.huggingface.co/v1/chat/completions",
         {
