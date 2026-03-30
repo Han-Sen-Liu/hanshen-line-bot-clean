@@ -6,7 +6,7 @@ require("dotenv").config();
 const app = express();
 app.use(express.json());
 
-console.log("SERVER_V_FINAL_777");
+console.log("SERVER_LIVE_V5");
 
 // ===== 檔案 =====
 const USERS_FILE = "./users.json";
@@ -33,10 +33,22 @@ let users = read(USERS_FILE);
 let usage = read(USAGE_FILE);
 
 // ===== 基本設定 =====
-const FREE = 3;
-const LINK = "https://vocus.cc/your-link"; // 改成你的方格子連結
+const FREE = 1;
+const LINK = "https://vocus.cc/salon/HansenWork";
+const COOLDOWN_MS = 3 * 60 * 1000;
 
-// ===== 使用者資料 =====
+// 你的 LINE 使用者 ID（只允許你自己下管理指令）
+// 去 LINE Developers 或 webhook log 找你的 userId，填進 .env
+const ADMIN_USER_ID = process.env.ADMIN_USER_ID || "";
+
+// ===== 30元單次自動碼（3分鐘冷卻）=====
+const singleCodeMap = {
+  CODE1A: 1
+};
+
+let singleCodeCooldowns = {};
+
+// ===== 使用者工具 =====
 function getUser(id) {
   if (!usage[id]) {
     usage[id] = { free: 0, paid: 0 };
@@ -89,15 +101,49 @@ async function reply(token, text) {
   );
 }
 
-// ===== 簡轉繁（基礎） =====
+// ===== 簡轉繁（基礎）=====
 function toTraditional(text) {
   const map = {
-    "师":"師","费":"費","联":"聯","络":"絡","说":"說","这":"這","个":"個",
-    "会":"會","为":"為","开":"開","关":"關","应":"應","对":"對","问":"問",
-    "题":"題","时":"時","间":"間","发":"發","现":"現","实":"實","后":"後",
-    "来":"來","过":"過","动":"動","点":"點","计":"計","画":"畫","国":"國",
-    "长":"長","风":"風","险":"險","机":"機","术":"術","断":"斷","级":"級",
-    "换":"換","资":"資","议":"議","单":"單","条":"條"
+    "师": "師",
+    "费": "費",
+    "联": "聯",
+    "络": "絡",
+    "说": "說",
+    "这": "這",
+    "个": "個",
+    "会": "會",
+    "为": "為",
+    "开": "開",
+    "关": "關",
+    "应": "應",
+    "对": "對",
+    "问": "問",
+    "题": "題",
+    "时": "時",
+    "间": "間",
+    "发": "發",
+    "现": "現",
+    "实": "實",
+    "后": "後",
+    "来": "來",
+    "过": "過",
+    "动": "動",
+    "点": "點",
+    "计": "計",
+    "画": "畫",
+    "国": "國",
+    "长": "長",
+    "风": "風",
+    "险": "險",
+    "机": "機",
+    "术": "術",
+    "断": "斷",
+    "级": "級",
+    "换": "換",
+    "资": "資",
+    "议": "議",
+    "单": "單",
+    "条": "條"
   };
 
   return text.replace(/[\u4e00-\u9fa5]/g, c => map[c] || c);
@@ -105,45 +151,65 @@ function toTraditional(text) {
 
 // ===== 固定文案 =====
 function pricingText() {
-  return `【收費方案】
-30次：88元
-80次：168元
+  return `【開通方式】
 
-【購買連結】
+1️⃣ 前往方格子購買
 ${LINK}
 
-付款後輸入啟用碼即可開通`;
+2️⃣ 單次方案
+購買後取得代碼，回LINE輸入即可自動開通
+
+3️⃣ 次數方案
+付款後請將截圖傳到官方LINE
+軍師確認後為你開通
+
+【方案】
+單次：30元
+30次：88元
+80次：168元`;
 }
 
 function usageText() {
-  return `【使用說明】
-1. 點「軍師判斷」
-2. 輸入你的問題
-3. 系統回覆：判斷／原因／建議
+  return `【使用方式】
+
+1️⃣ 點「軍師判斷」
+2️⃣ 輸入你的問題
+3️⃣ 可補生辰八字
+4️⃣ 系統回覆：
+【判斷】
+【原因】
+【建議】
 
 【免費次數】
-3次
-
-【收費方案】
-30次：88元
-80次：168元
-
-【購買連結】
-${LINK}`;
+1次`;
 }
 
 function contactText() {
   return `【聯絡軍師】
+
 合作 / 客製 / 問題回報
 請直接留言`;
 }
 
 function askText(id) {
-  const birth = users[id]?.birth || "尚未提供";
-  return `請直接輸入你的問題
+  const birth = users[id]?.birth || "未提供";
 
-生辰資料：${birth}
+  return `請先輸入你的問題
+
+（可補生辰八字，例如：1990/01/01 15:30）
+
+目前生辰：${birth}
 剩餘次數：${remaining(id)}`;
+}
+
+function adminHelpText() {
+  return `【管理指令】
+
+開通30次：
+ADD30
+
+開通80次：
+ADD80`;
 }
 
 // ===== Webhook =====
@@ -162,22 +228,26 @@ app.post("/webhook", async (req, res) => {
       const token = e.replyToken;
       const text = e.message.text.trim();
 
-      console.log("INCOMING:", text);
+      console.log("INCOMING:", id, text);
 
       getUser(id);
 
-      // ===== 1. 記錄生辰 =====
-      if (text.includes("生辰") || text.includes("生日")) {
+      // ===== 記錄生辰 =====
+      if (
+        text.includes("生辰") ||
+        text.includes("生日") ||
+        /^\d{4}\/\d{1,2}\/\d{1,2}/.test(text)
+      ) {
         users[id] = {
           ...(users[id] || {}),
           birth: text
         };
         write(USERS_FILE, users);
-        await reply(token, "已記錄");
+        await reply(token, `生辰已記錄\n\n目前資料：${text}`);
         continue;
       }
 
-      // ===== 2. 功能按鈕永遠優先 =====
+      // ===== Rich Menu 功能優先 =====
       if (text === "軍師判斷") {
         await reply(token, askText(id));
         continue;
@@ -198,47 +268,54 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
-      // ===== 3. 啟用碼永遠優先 =====
-      if (text === "TEST100") {
-        addPaid(id, 100);
-        await reply(token, `開通成功 +100\n剩餘：${remaining(id)}`);
-        continue;
-      }
-
-      if (text === "A1B2C3") {
+      // ===== 管理員指令（只有你本人可用）=====
+      if (id === ADMIN_USER_ID && text === "ADD30") {
         addPaid(id, 30);
-        await reply(token, `開通成功 +30\n剩餘：${remaining(id)}`);
+        await reply(token, `已開通30次\n剩餘：${remaining(id)}`);
         continue;
       }
 
-      if (text === "D4E5F6") {
-        addPaid(id, 30);
-        await reply(token, `開通成功 +30\n剩餘：${remaining(id)}`);
-        continue;
-      }
-
-      if (text === "G7H8I9") {
+      if (id === ADMIN_USER_ID && text === "ADD80") {
         addPaid(id, 80);
-        await reply(token, `開通成功 +80\n剩餘：${remaining(id)}`);
+        await reply(token, `已開通80次\n剩餘：${remaining(id)}`);
         continue;
       }
 
-      if (text === "J1K2L3") {
-        addPaid(id, 80);
-        await reply(token, `開通成功 +80\n剩餘：${remaining(id)}`);
+      if (id === ADMIN_USER_ID && text === "管理指令") {
+        await reply(token, adminHelpText());
         continue;
       }
 
-      // ===== 4. 真正提問，才檢查次數 =====
+      // ===== 30元單次自動碼（3分鐘冷卻）=====
+      if (singleCodeMap[text]) {
+        const now = Date.now();
+        const lastUsed = singleCodeCooldowns[text] || 0;
+
+        if (now - lastUsed < COOLDOWN_MS) {
+          const remainSec = Math.ceil((COOLDOWN_MS - (now - lastUsed)) / 1000);
+          await reply(token, `此啟用碼冷卻中，請 ${remainSec} 秒後再試`);
+          continue;
+        }
+
+        singleCodeCooldowns[text] = now;
+
+        const count = singleCodeMap[text];
+        addPaid(id, count);
+
+        await reply(token, `開通成功 +${count}\n剩餘：${remaining(id)}`);
+        continue;
+      }
+
+      // ===== 真正提問才檢查次數 =====
       if (!hasQuota(id)) {
         await reply(token, pricingText());
         continue;
       }
 
-      // ===== 5. 扣次數 =====
+      // ===== 扣次數 =====
       useOne(id);
 
-      // ===== 6. AI 回覆 =====
+      // ===== AI =====
       const aiRes = await axios.post(
         "https://router.huggingface.co/v1/chat/completions",
         {
@@ -291,8 +368,7 @@ app.post("/webhook", async (req, res) => {
 
       const finalText = `${out}
 
-剩餘次數：${remaining(id)}
-購買連結：${LINK}`;
+剩餘次數：${remaining(id)}`;
 
       await reply(token, finalText);
     }
