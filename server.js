@@ -6,7 +6,7 @@ require("dotenv").config();
 const app = express();
 app.use(express.json());
 
-console.log("SERVER_LIVE_V6");
+console.log("SERVER_LIVE_FINAL");
 
 // ===== 檔案 =====
 const USERS_FILE = "./users.json";
@@ -35,15 +35,20 @@ let usage = read(USAGE_FILE);
 // ===== 設定 =====
 const FREE = 1;
 const COOLDOWN = 3 * 60 * 1000;
+const ADMIN_ID = process.env.ADMIN_USER_ID;
 const LINK = "https://vocus.cc/salon/HansenWork";
 
-const redeemCodes = {
+// 單次碼
+const singleCodes = {
   CODE1A: 1
 };
 
+let cooldownMap = {};
+
+// ===== 工具 =====
 function getUser(id) {
   if (!usage[id]) {
-    usage[id] = { free: 0, paid: 0, last: 0 };
+    usage[id] = { free: 0, paid: 0 };
     write(USAGE_FILE, usage);
   }
   return usage[id];
@@ -54,31 +59,16 @@ function remaining(id) {
   return Math.max(0, FREE - u.free) + u.paid;
 }
 
-function hasQuota(id) {
-  return remaining(id) > 0;
-}
-
-function checkCooldown(id) {
-  const u = getUser(id);
-  return Date.now() - u.last < COOLDOWN;
-}
-
 function useOne(id) {
   const u = getUser(id);
-
-  if (u.paid > 0) {
-    u.paid -= 1;
-  } else if (u.free < FREE) {
-    u.free += 1;
-  }
-
-  u.last = Date.now();
+  if (u.paid > 0) u.paid -= 1;
+  else if (u.free < FREE) u.free += 1;
   write(USAGE_FILE, usage);
 }
 
-function addPaid(id, count) {
+function addPaid(id, n) {
   const u = getUser(id);
-  u.paid += count;
+  u.paid += n;
   write(USAGE_FILE, usage);
 }
 
@@ -92,8 +82,7 @@ async function reply(token, text) {
     },
     {
       headers: {
-        Authorization: `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}`,
-        "Content-Type": "application/json"
+        Authorization: `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}`
       }
     }
   );
@@ -101,18 +90,24 @@ async function reply(token, text) {
 
 // ===== 文案 =====
 function pricingText() {
-  return `【開通方式】
+  return `【立即開通】
 
-前往購買：
-${LINK}
+30次：88元  
+80次：168元  
 
-單次：30元（自動開通）
-30次 / 80次：付款後截圖給官方LINE開通`;
+👉 街口支付（396）  
+帳號：903420909  
+
+👉 一鍵轉帳  
+https://service.jkopay.com/r/transfer?j=Transfer:903420909  
+
+完成付款後截圖傳來  
+立即為你開通`;
 }
 
 function askText(id) {
-  return `請輸入你的問題
-（可補生辰）
+  return `請輸入你的問題  
+（可補生辰）  
 
 剩餘次數：${remaining(id)}`;
 }
@@ -134,34 +129,56 @@ app.post("/webhook", async (req, res) => {
 
       getUser(id);
 
-      if (text === "1") {
+      // ===== 管理員 =====
+      if (id === ADMIN_ID && text === "ADD30") {
+        addPaid(id, 30);
+        await reply(token, `已開通30次\n剩餘：${remaining(id)}`);
+        continue;
+      }
+
+      if (id === ADMIN_ID && text === "ADD80") {
+        addPaid(id, 80);
+        await reply(token, `已開通80次\n剩餘：${remaining(id)}`);
+        continue;
+      }
+
+      // ===== 功能 =====
+      if (text === "1" || text === "軍師判斷") {
         await reply(token, askText(id));
         continue;
       }
 
-      if (text === "2") {
+      if (text === "2" || text === "收費") {
         await reply(token, pricingText());
         continue;
       }
 
-      if (redeemCodes[text]) {
-        addPaid(id, redeemCodes[text]);
+      // ===== 單次碼 =====
+      if (singleCodes[text]) {
+        const now = Date.now();
+        const last = cooldownMap[text] || 0;
+
+        if (now - last < COOLDOWN) {
+          await reply(token, "此代碼冷卻中，請稍後再試");
+          continue;
+        }
+
+        cooldownMap[text] = now;
+        addPaid(id, 1);
+
         await reply(token, `開通成功\n剩餘：${remaining(id)}`);
         continue;
       }
 
-      if (!hasQuota(id)) {
+      // ===== 次數不足 =====
+      if (remaining(id) <= 0) {
         await reply(token, pricingText());
-        continue;
-      }
-
-      if (checkCooldown(id)) {
-        await reply(token, "請3分鐘後再使用");
         continue;
       }
 
       useOne(id);
 
+      // ===== AI =====
       const aiRes = await axios.post(
         "https://router.huggingface.co/v1/chat/completions",
         {
@@ -171,10 +188,9 @@ app.post("/webhook", async (req, res) => {
               role: "system",
               content: `你是涵森軍師。
 
-【規則】
-短句、直接、不可廢話
+短句、直接、有決策感。
 
-【格式】
+固定格式：
 
 【判斷】
 一句結論
@@ -183,22 +199,22 @@ app.post("/webhook", async (req, res) => {
 最多2句
 
 【建議】
-一行行動
+一個行動
 
 【吉位】
 一個方位
 
 【吉時】
-一段時間
+一個時間
 
 【吉顏色】
 1-2個
 
 【助力五行】
-一種五行+一句說明
+一個五行＋一句話
 
 【護身心法】
-一句短句
+一句話
 
 最後加：
 —涵森軍師`
@@ -213,21 +229,14 @@ app.post("/webhook", async (req, res) => {
         }
       );
 
-      let out =
-        aiRes.data?.choices?.[0]?.message?.content ||
-        "系統錯誤";
+      const out =
+        aiRes.data?.choices?.[0]?.message?.content || "系統忙碌";
 
-      const finalText = `${out}
-
-剩餘次數：${remaining(id)}`;
-
-      await reply(token, finalText);
+      await reply(token, `${out}\n\n剩餘次數：${remaining(id)}`);
     }
   } catch (err) {
     console.log(err.message);
   }
 });
 
-app.listen(3000, () => {
-  console.log("RUNNING_3000");
-});
+app.listen(3000);
