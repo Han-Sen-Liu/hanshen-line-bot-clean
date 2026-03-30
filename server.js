@@ -6,7 +6,7 @@ require("dotenv").config();
 const app = express();
 app.use(express.json());
 
-console.log("SERVER_LIVE_FINAL");
+console.log("SERVER_LIVE_V7");
 
 // ===== 檔案 =====
 const USERS_FILE = "./users.json";
@@ -36,9 +36,8 @@ let usage = read(USAGE_FILE);
 const FREE = 1;
 const COOLDOWN = 3 * 60 * 1000;
 const ADMIN_ID = process.env.ADMIN_USER_ID;
-const LINK = "https://vocus.cc/salon/HansenWork";
 
-// 單次碼
+// 單次代碼（自動）
 const singleCodes = {
   CODE1A: 1
 };
@@ -88,12 +87,12 @@ async function reply(token, text) {
   );
 }
 
-// ===== 文案 =====
+// ===== 收費文案 =====
 function pricingText() {
   return `【立即開通】
 
-30次：88元  
-80次：168元  
+30次：88元（最熱門）  
+80次：168元（高頻使用）  
 
 👉 街口支付（396）  
 帳號：903420909  
@@ -101,8 +100,10 @@ function pricingText() {
 👉 一鍵轉帳  
 https://service.jkopay.com/r/transfer?j=Transfer:903420909  
 
-完成付款後截圖傳來  
-立即為你開通`;
+付款完成後  
+截圖傳來  
+
+👉 立即開通使用`;
 }
 
 function askText(id) {
@@ -129,7 +130,7 @@ app.post("/webhook", async (req, res) => {
 
       getUser(id);
 
-      // ===== 管理員 =====
+      // ===== 管理員開通 =====
       if (id === ADMIN_ID && text === "ADD30") {
         addPaid(id, 30);
         await reply(token, `已開通30次\n剩餘：${remaining(id)}`);
@@ -153,7 +154,7 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
-      // ===== 單次碼 =====
+      // ===== 單次碼（有冷卻）=====
       if (singleCodes[text]) {
         const now = Date.now();
         const last = cooldownMap[text] || 0;
@@ -170,7 +171,7 @@ app.post("/webhook", async (req, res) => {
         continue;
       }
 
-      // ===== 次數不足 =====
+      // ===== 沒次數 =====
       if (remaining(id) <= 0) {
         await reply(token, pricingText());
         continue;
@@ -190,7 +191,7 @@ app.post("/webhook", async (req, res) => {
 
 短句、直接、有決策感。
 
-固定格式：
+格式如下：
 
 【判斷】
 一句結論
